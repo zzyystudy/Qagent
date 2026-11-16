@@ -1,0 +1,26 @@
+server:
+  port: 8100
+spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+
+# knife4j配置
+knife4j:
+  enable: true
+# springdoc-openapi项目配置
+springdoc:
+  # 禁用扫描@ControllerAdvice的泛型响应，避免Spring Framework 6.2.x的ControllerAdviceBean构造器不兼容
+  override-with-generic-response: false
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.zxyy.qagent.controller
