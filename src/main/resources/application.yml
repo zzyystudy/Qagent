@@ -6,6 +6,13 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
+mybatis-plus:
+  type-aliases-package: com.zxyy.qagent.rag.dao.entities
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
 
 # knife4j配置
 knife4j:
