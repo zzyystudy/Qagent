@@ -63,6 +63,9 @@ public abstract class AbstractOpenAIStyleEmbeddingClient implements EmbeddingCli
      * 默认实现：添加 encoding_format=float
      */
     protected void customizeRequestBody(JsonObject body, ModelTarget target) {
+        if ("BAAI/bge-m3".equals(target.candidate().getModel())) {
+            body.remove("dimensions");
+        }
         body.addProperty("encoding_format", "float");
     }
 
