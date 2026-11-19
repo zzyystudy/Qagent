@@ -19,7 +19,7 @@ package com.zxyy.qagent.rag.registry;
 
 import com.zxyy.qagent.exception.ClientException;
 import com.zxyy.qagent.exception.ServiceException;
-import com.zxyy.qagent.rag.parase.DocumentParser;
+import com.zxyy.qagent.rag.parser.DocumentParser;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;

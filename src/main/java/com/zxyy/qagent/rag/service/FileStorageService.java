@@ -26,7 +26,7 @@ import java.io.InputStream;
  * 文件存储服务：后端无关的高层门面
  * <p>
  * 所有知识库文档共用一个全局桶，按 {@code namespace}（= 知识库 collectionName）划分目录（key 前缀）；
- * 多模态资产落公共读资产桶。底层通过 {@link com.nageoffer.ai.ragent.rag.core.storage.ObjectStorageClient}
+ * 多模态资产落公共读资产桶。底层通过 {@link com.zxyy.qagent.rag.storage.ObjectStorageClient}
  * 在 S3 兼容存储与阿里云 OSS 间切换，业务代码只依赖本接口
  * <p>
  * 存储引用（{@link StoredFileDTO#getUrl()} / 文档 file_url）只保留裸 key（如 {@code {namespace}/{uuid}.ext}）：
