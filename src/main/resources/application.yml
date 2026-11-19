@@ -26,7 +26,7 @@ spring:
 
 
 mybatis-plus:
-  type-aliases-package: com.zxyy.qagent.rag.dao.entities,com.zxyy.qagent.knowledge.dao.entity
+  type-aliases-package: com.zxyy.qagent.rag.dao.entities,com.zxyy.qagent.knowledge.dao.entity,com.zxyy.qagent.ingest.entity
   mapper-locations: classpath*:mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true

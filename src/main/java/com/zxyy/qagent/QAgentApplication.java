@@ -6,7 +6,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @MapperScan({
         "com.zxyy.qagent.rag.dao.mapper",
-        "com.zxyy.qagent.knowledge.dao.mapper"
+        "com.zxyy.qagent.knowledge.dao.mapper",
+        "com.zxyy.qagent.ingest.dao.mapper"
 })
 @SpringBootApplication
 public class QAgentApplication {

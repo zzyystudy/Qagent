@@ -30,6 +30,7 @@
         <batik.version>1.18</batik.version>
         <hutool.version>5.8.37</hutool.version>
         <jspecify.version>1.0.0</jspecify.version>
+        <logrecord.version>3.0.6</logrecord.version>
     </properties>
 
     <dependencies>
@@ -152,6 +153,12 @@
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
             <version>${jspecify.version}</version>
+        </dependency>
+        <!--log record-->
+        <dependency>
+            <groupId>io.github.mouzt</groupId>
+            <artifactId>bizlog-sdk</artifactId>
+            <version>${logrecord.version}</version>
         </dependency>
     </dependencies>
 
