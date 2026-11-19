@@ -29,6 +29,7 @@
         <mybatis-plus.version>3.5.15</mybatis-plus.version>
         <batik.version>1.18</batik.version>
         <hutool.version>5.8.37</hutool.version>
+        <jspecify.version>1.0.0</jspecify.version>
     </properties>
 
     <dependencies>
@@ -145,6 +146,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <!--jspecify-->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <version>${jspecify.version}</version>
         </dependency>
     </dependencies>
 

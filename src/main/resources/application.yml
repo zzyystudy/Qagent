@@ -26,7 +26,7 @@ spring:
 
 
 mybatis-plus:
-  type-aliases-package: com.zxyy.qagent.rag.dao.entities
+  type-aliases-package: com.zxyy.qagent.rag.dao.entities,com.zxyy.qagent.knowledge.dao.entity
   mapper-locations: classpath*:mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
@@ -57,5 +57,14 @@ rag:
     s3:
       access-key: rustfsadmin
       secret-key: rustfsadmin
-      endpoint: ${shared.service.node}:9000
+      endpoint: http://${shared.service.node}:9000
+  default:
+    collection-name: Qrag_collection
+    dimension: 1024
+    metric-type: COSINE
+  vector:
+    type: milvus
+milvus:
+  uri: http://${shared.service.node}:19530
+
 
