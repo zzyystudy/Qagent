@@ -21,35 +21,37 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.zxyy.qagent.exception.ClientException;
-import com.zxyy.qagent.exception.ServiceException;
-import com.zxyy.qagent.framework.context.UserContext;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.zxyy.qagent.inf.model.ModelSelector;
+import com.zxyy.qagent.rag.config.RAGDefaultProperties;
 import com.zxyy.qagent.knowledge.controller.request.KnowledgeBaseCreateRequest;
 import com.zxyy.qagent.knowledge.controller.request.KnowledgeBasePageRequest;
-import com.zxyy.qagent.knowledge.controller.request.KnowledgeBaseUpdateRequest;
 import com.zxyy.qagent.knowledge.controller.vo.KnowledgeBaseVO;
 import com.zxyy.qagent.knowledge.dao.entity.KnowledgeBaseDO;
 import com.zxyy.qagent.knowledge.dao.entity.KnowledgeDocumentDO;
 import com.zxyy.qagent.knowledge.dao.mapper.KnowledgeBaseMapper;
 import com.zxyy.qagent.knowledge.dao.mapper.KnowledgeDocumentMapper;
-import com.zxyy.qagent.knowledge.service.KnowledgeBaseService;
+import com.zxyy.qagent.framework.context.UserContext;
+import com.zxyy.qagent.exception.ClientException;
+import com.zxyy.qagent.rag.vector.VectorSpaceId;
+import com.zxyy.qagent.rag.vector.VectorSpaceSpec;
+import com.zxyy.qagent.rag.vector.VectorStoreAdmin;
 import com.zxyy.qagent.rag.service.FileStorageService;
+import com.zxyy.qagent.knowledge.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
@@ -58,202 +60,78 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
     private final VectorStoreAdmin vectorStoreAdmin;
     private final FileStorageService fileStorageService;
-    private final MessageQueueProducer messageQueueProducer;
-    private final BizChangeLogContext bizChangeLogContext;
-
-    @Value("knowledge-base-cleanup_topic${unique-name:}")
-    private String cleanupTopic;
+    private final ModelSelector modelSelector;
+    private final RAGDefaultProperties ragDefaultProperties;
 
     @Transactional
     @Override
-    @LogRecord(
-            success = "创建知识库：{{#requestParam.name}}",
-            fail = "创建知识库失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_BASE,
-            subType = BizChangeOperationType.CREATE,
-            bizNo = BizChangeLogContext.BIZ_ID_EXPRESSION,
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public String create(KnowledgeBaseCreateRequest requestParam) {
+        String name = requestParam.getName() == null ? "" : requestParam.getName().strip();
+        if (name.isEmpty() || name.length() > 50) {
+            throw new ClientException("知识库名称须为 1 到 50 个字符");
+        }
+        String collectionName = requestParam.getCollectionName();
+        if (collectionName == null || !collectionName.matches("[a-z0-9]{1,50}")) {
+            throw new ClientException("Collection 名称须为 1 到 50 位小写字母或数字");
+        }
+        String modelId = requestParam.getEmbeddingModel();
+        boolean modelAvailable = modelSelector.selectEmbeddingCandidates().stream()
+                .anyMatch(target -> target.id().equals(modelId)
+                        && Objects.equals(target.candidate().getDimension(), ragDefaultProperties.getDimension()));
+        if (!modelAvailable) {
+            throw new ClientException("请选择维度匹配且可用的 Embedding 模型");
+        }
+
         // 名称重复校验
-        String name = requestParam.getName().replaceAll("\\s+", "");
         Long count = knowledgeBaseMapper.selectCount(
                 new LambdaQueryWrapper<KnowledgeBaseDO>()
                         .eq(KnowledgeBaseDO::getName, name)
                         .eq(KnowledgeBaseDO::getDeleted, 0)
         );
         if (count > 0) {
-            throw new ServiceException("知识库名称已存在：" + requestParam.getName());
+            throw new ClientException("知识库名称已存在：" + requestParam.getName());
         }
 
         // Collection 名重复校验（共享 collection 模型下，向量层不再拦截重复，需在此显式校验）
         Long collectionCount = knowledgeBaseMapper.selectCount(
                 new LambdaQueryWrapper<KnowledgeBaseDO>()
-                        .eq(KnowledgeBaseDO::getCollectionName, requestParam.getCollectionName())
+                        .eq(KnowledgeBaseDO::getCollectionName, collectionName)
                         .eq(KnowledgeBaseDO::getDeleted, 0)
         );
         if (collectionCount > 0) {
-            throw new ServiceException("Collection 名称已存在：" + requestParam.getCollectionName());
+            throw new ClientException("Collection 名称已存在：" + collectionName);
         }
 
+        Date now = new Date();
         KnowledgeBaseDO kbDO = KnowledgeBaseDO.builder()
-                .name(requestParam.getName())
-                .embeddingModel(requestParam.getEmbeddingModel())
-                .collectionName(requestParam.getCollectionName())
+                .name(name)
+                .embeddingModel(modelId)
+                .collectionName(collectionName)
                 .createdBy(UserContext.getUsername())
                 .updatedBy(UserContext.getUsername())
+                .createTime(now)
+                .updateTime(now)
                 .deleted(0)
                 .build();
 
-        knowledgeBaseMapper.insert(kbDO);
+        try {
+            knowledgeBaseMapper.insert(kbDO);
+        } catch (DuplicateKeyException e) {
+            throw new ClientException("Collection 名称已存在：" + collectionName);
+        }
 
         // 在全局知识库桶下建立该知识库目录（幂等），collectionName 即目录名
-        fileStorageService.createKnowledgeSpace(requestParam.getCollectionName());
+        fileStorageService.createKnowledgeSpace(collectionName);
 
         VectorSpaceSpec spaceSpec = VectorSpaceSpec.builder()
                 .spaceId(VectorSpaceId.builder()
-                        .logicalName(requestParam.getCollectionName())
+                        .logicalName(collectionName)
                         .build())
-                .remark(requestParam.getName())
+                .remark(name)
                 .build();
         vectorStoreAdmin.ensureVectorSpace(spaceSpec);
 
-        bizChangeLogContext.put(String.valueOf(kbDO.getId()), null, kbDO);
         return String.valueOf(kbDO.getId());
-    }
-
-    @Override
-    @LogRecord(
-            success = "更新知识库：{{#requestParam.id}}",
-            fail = "更新知识库失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_BASE,
-            subType = BizChangeOperationType.UPDATE,
-            bizNo = "{{#requestParam.id}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
-    public void update(KnowledgeBaseUpdateRequest requestParam) {
-        KnowledgeBaseDO kb = knowledgeBaseMapper.selectById(requestParam.getId());
-        if (kb == null || kb.getDeleted() != null && kb.getDeleted() == 1) {
-            throw new ClientException("知识库不存在：" + requestParam.getId());
-        }
-        KnowledgeBaseDO before = BeanUtil.copyProperties(kb, KnowledgeBaseDO.class);
-
-        if (StringUtils.hasText(requestParam.getEmbeddingModel())
-                && !requestParam.getEmbeddingModel().equals(kb.getEmbeddingModel())) {
-
-            Long docCount = knowledgeDocumentMapper.selectCount(
-                    new LambdaQueryWrapper<KnowledgeDocumentDO>()
-                            .eq(KnowledgeDocumentDO::getKbId, requestParam.getId())
-                            .gt(KnowledgeDocumentDO::getChunkCount, 0)
-                            .eq(KnowledgeDocumentDO::getDeleted, 0)
-            );
-            if (docCount > 0) {
-                throw new ClientException("知识库已存在向量化文档，不允许修改嵌入模型");
-            }
-
-            kb.setEmbeddingModel(requestParam.getEmbeddingModel());
-        }
-
-        if (StringUtils.hasText(requestParam.getName())) {
-            kb.setName(requestParam.getName());
-        }
-
-        kb.setUpdatedBy(UserContext.getUsername());
-        knowledgeBaseMapper.updateById(kb);
-        bizChangeLogContext.put(requestParam.getId(), before, knowledgeBaseMapper.selectById(requestParam.getId()));
-    }
-
-    @Override
-    @LogRecord(
-            success = "重命名知识库：{{#kbId}}",
-            fail = "重命名知识库失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_BASE,
-            subType = BizChangeOperationType.UPDATE,
-            bizNo = "{{#kbId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
-    public void rename(String kbId, KnowledgeBaseUpdateRequest requestParam) {
-        KnowledgeBaseDO kb = knowledgeBaseMapper.selectById(kbId);
-        if (kb == null || kb.getDeleted() != null && kb.getDeleted() == 1) {
-            throw new ClientException("知识库不存在");
-        }
-        KnowledgeBaseDO before = BeanUtil.copyProperties(kb, KnowledgeBaseDO.class);
-
-        if (!StringUtils.hasText(requestParam.getName())) {
-            throw new ClientException("知识库名称不能为空");
-        }
-
-        // 名称重复校验（排除当前知识库）
-        String name = requestParam.getName().replaceAll("\\s+", "");
-        Long count = knowledgeBaseMapper.selectCount(
-                Wrappers.lambdaQuery(KnowledgeBaseDO.class)
-                        .eq(KnowledgeBaseDO::getName, name)
-                        .ne(KnowledgeBaseDO::getId, kbId)
-                        .eq(KnowledgeBaseDO::getDeleted, 0)
-        );
-        if (count > 0) {
-            throw new ServiceException("知识库名称已存在：" + requestParam.getName());
-        }
-
-        kb.setName(requestParam.getName());
-        kb.setUpdatedBy(UserContext.getUsername());
-        knowledgeBaseMapper.updateById(kb);
-        bizChangeLogContext.put(kbId, before, knowledgeBaseMapper.selectById(kbId));
-
-        log.info("成功重命名知识库, kbId={}, newName={}", kbId, requestParam.getName());
-    }
-
-    @Override
-    @LogRecord(
-            success = "删除知识库：{{#kbId}}",
-            fail = "删除知识库失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_BASE,
-            subType = BizChangeOperationType.DELETE,
-            bizNo = "{{#kbId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
-    public void delete(String kbId) {
-        KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(kbId);
-        if (kbDO == null || kbDO.getDeleted() != null && kbDO.getDeleted() == 1) {
-            throw new ClientException("知识库不存在");
-        }
-        KnowledgeBaseDO before = BeanUtil.copyProperties(kbDO, KnowledgeBaseDO.class);
-
-        Long docCount = knowledgeDocumentMapper.selectCount(
-                Wrappers.lambdaQuery(KnowledgeDocumentDO.class)
-                        .eq(KnowledgeDocumentDO::getKbId, kbId)
-                        .eq(KnowledgeDocumentDO::getDeleted, 0)
-        );
-        if (docCount != null && docCount > 0) {
-            throw new ClientException("当前知识库下还有文档，请删除文档");
-        }
-
-        String operator = UserContext.getUsername();
-        KnowledgeBaseCleanupEvent event = KnowledgeBaseCleanupEvent.builder()
-                .kbId(kbId)
-                .collectionName(kbDO.getCollectionName())
-                .operator(operator)
-                .build();
-
-        // 事务消息：本地事务软删知识库，提交后由消费者异步回收底层物理资源（Milvus collection / bucket / 残留向量）
-        messageQueueProducer.sendInTransaction(
-                cleanupTopic,
-                kbId,
-                "知识库删除清理",
-                event,
-                arg -> {
-                    kbDO.setUpdatedBy(operator);
-                    int rows = knowledgeBaseMapper.deleteById(kbDO);
-                    if (rows == 0) {
-                        throw new ClientException("知识库不存在或已删除");
-                    }
-                }
-        );
-        bizChangeLogContext.put(kbId, before, null);
     }
 
     @Override
@@ -270,9 +148,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         LambdaQueryWrapper<KnowledgeBaseDO> queryWrapper = Wrappers.lambdaQuery(KnowledgeBaseDO.class)
                 .like(StringUtils.hasText(requestParam.getName()), KnowledgeBaseDO::getName, requestParam.getName())
                 .eq(KnowledgeBaseDO::getDeleted, 0)
-                .orderByDesc(KnowledgeBaseDO::getUpdateTime);
+                .orderByDesc(KnowledgeBaseDO::getUpdateTime)
+                .orderByDesc(KnowledgeBaseDO::getId);
 
-        Page<KnowledgeBaseDO> page = new Page<>(requestParam.getCurrent(), requestParam.getSize());
+        Page<KnowledgeBaseDO> page = new Page<>(Math.max(1, requestParam.getCurrent()), Math.max(1, Math.min(100, requestParam.getSize())));
         IPage<KnowledgeBaseDO> result = knowledgeBaseMapper.selectPage(page, queryWrapper);
         Map<String, Long> docCountMap = new HashMap<>();
         if (CollUtil.isNotEmpty(result.getRecords())) {

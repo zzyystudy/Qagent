@@ -111,7 +111,7 @@ public class IngestionSpecCodec {
             throw new ClientException("摄取配置 JSON 格式不合法");
         }
         try {
-            return write(fromMap(raw));
+            return raw == null ? null : write(fromMap(raw));
         } catch (IllegalArgumentException e) {
             throw new ClientException("摄取配置不合法：" + e.getMessage());
         }

@@ -19,6 +19,7 @@ package com.zxyy.qagent.knowledge.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.zxyy.qagent.exception.ClientException;
 import com.zxyy.qagent.framework.conversion.Result;
 import com.zxyy.qagent.framework.web.Results;
 import com.zxyy.qagent.knowledge.controller.request.KnowledgeDocumentPageRequest;
@@ -34,6 +35,7 @@ import com.zxyy.qagent.rag.service.FileStorageService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.util.StreamUtils;
 import org.springframework.validation.annotation.Validated;
@@ -81,7 +83,7 @@ public class KnowledgeDocumentController {
     }
 
     /**
-     * 上传文档：入库记录 + 文件落盘，返回文档ID
+     * 上传原文件到对象存储，创建待处理的文档记录
      */
     @PostMapping(value = "/knowledge-base/{kb-id}/docs/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<KnowledgeDocumentVO> upload(@PathVariable("kb-id") String kbId,
@@ -91,7 +93,7 @@ public class KnowledgeDocumentController {
     }
 
     /**
-     * 开始分块：抽取文本 -> 分块 -> 嵌入并写入向量库
+     * 同步解析、分块、向量化并写入索引
      */
     @PostMapping("/knowledge-base/docs/{doc-id}/chunk")
     public Result<Void> startChunk(@PathVariable(value = "doc-id") String docId) {
@@ -100,7 +102,7 @@ public class KnowledgeDocumentController {
     }
 
     /**
-     * 删除文档：逻辑删除。可选同时删除向量库中该文档的所有 chunk
+     * 删除文档及对应分块、向量和原文件
      */
     @DeleteMapping("/knowledge-base/docs/{doc-id}")
     public Result<Void> delete(@PathVariable(value = "doc-id") String docId) {
@@ -187,5 +189,11 @@ public class KnowledgeDocumentController {
         try (InputStream in = fileStorageService.openStream(doc.getFileUrl())) {
             StreamUtils.copy(in, response.getOutputStream());
         }
+    }
+
+    @ExceptionHandler(ClientException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleClientException(ClientException exception) {
+        return new Result<Void>().setCode(exception.getErrorCode()).setMessage(exception.getErrorMessage());
     }
 }

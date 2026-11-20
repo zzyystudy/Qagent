@@ -20,7 +20,6 @@ package com.zxyy.qagent.knowledge.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.zxyy.qagent.knowledge.controller.request.KnowledgeBaseCreateRequest;
 import com.zxyy.qagent.knowledge.controller.request.KnowledgeBasePageRequest;
-import com.zxyy.qagent.knowledge.controller.request.KnowledgeBaseUpdateRequest;
 import com.zxyy.qagent.knowledge.controller.vo.KnowledgeBaseVO;
 
 /**
@@ -35,28 +34,6 @@ public interface KnowledgeBaseService {
      * @return 知识库ID
      */
     String create(KnowledgeBaseCreateRequest requestParam);
-
-    /**
-     * 更新知识库
-     *
-     * @param requestParam 更新知识库请求参数
-     */
-    void update(KnowledgeBaseUpdateRequest requestParam);
-
-    /**
-     * 重命名知识库
-     *
-     * @param kbId         知识库ID
-     * @param requestParam 重命名请求参数
-     */
-    void rename(String kbId, KnowledgeBaseUpdateRequest requestParam);
-
-    /**
-     * 删除知识库
-     *
-     * @param kbId 知识库ID
-     */
-    void delete(String kbId);
 
     /**
      * 根据ID查询知识库详情

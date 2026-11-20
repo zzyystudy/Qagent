@@ -35,6 +35,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -59,6 +60,7 @@ public class RelationalChunkSink implements ChunkSink {
             return;
         }
         String username = UserContext.getUsername();
+        Date now = new Date();
         List<KnowledgeChunkDO> rows = new ArrayList<>(chunks.size());
         for (EmbeddedChunk chunk : chunks) {
             String content = chunk.content();
@@ -75,6 +77,8 @@ public class RelationalChunkSink implements ChunkSink {
                     .enabled(1)
                     .createdBy(username)
                     .updatedBy(username)
+                    .createTime(now)
+                    .updateTime(now)
                     .build());
         }
         chunkMapper.insert(rows);

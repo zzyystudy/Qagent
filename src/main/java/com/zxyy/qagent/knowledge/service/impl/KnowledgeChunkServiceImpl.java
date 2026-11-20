@@ -26,6 +26,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.zxyy.qagent.exception.ClientException;
+import com.zxyy.qagent.exception.ServiceException;
 import com.zxyy.qagent.framework.context.UserContext;
 import com.zxyy.qagent.inf.token.TokenCounterService;
 import com.zxyy.qagent.ingest.VectorTarget;
@@ -41,7 +42,10 @@ import com.zxyy.qagent.knowledge.dao.entity.KnowledgeDocumentDO;
 import com.zxyy.qagent.knowledge.dao.mapper.KnowledgeBaseMapper;
 import com.zxyy.qagent.knowledge.dao.mapper.KnowledgeChunkMapper;
 import com.zxyy.qagent.knowledge.dao.mapper.KnowledgeDocumentMapper;
+import com.zxyy.qagent.knowledge.enums.DocumentStatus;
 import com.zxyy.qagent.knowledge.service.KnowledgeChunkService;
+import com.zxyy.qagent.knowledge.support.VectorTargetResolver;
+import com.zxyy.qagent.rag.chunk.model.Chunk;
 import com.zxyy.qagent.rag.chunk.model.ChunkAssembler;
 import com.zxyy.qagent.rag.chunk.model.EmbeddedChunk;
 import com.zxyy.qagent.rag.vector.VectorStoreService;
@@ -71,7 +75,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
     private final TokenCounterService tokenCounterService;
     private final VectorStoreService vectorStoreService;
     private final TransactionOperations transactionOperations;
-    private final BizChangeLogContext bizChangeLogContext;
 
     @Override
     public IPage<KnowledgeChunkVO> pageQuery(String docId, KnowledgeChunkPageRequest requestParam) {
@@ -90,15 +93,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @LogRecord(
-            success = "新增 Chunk：{{#_ret.id}}",
-            fail = "新增 Chunk 失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_CHUNK,
-            subType = BizChangeOperationType.CREATE,
-            bizNo = "{{#bizChangeBizId != null ? #bizChangeBizId : #docId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public KnowledgeChunkVO create(String docId, KnowledgeChunkCreateRequest requestParam) {
         KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
         Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
@@ -155,21 +149,11 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         // 同步写入向量库
         syncChunkToVector(collectionName, docId, chunkDO, vectorTargetResolver.resolve(kbDO));
 
-        bizChangeLogContext.put(String.valueOf(chunkDO.getId()), null, chunkDO);
         return BeanUtil.toBean(chunkDO, KnowledgeChunkVO.class);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @LogRecord(
-            success = "更新 Chunk：{{#chunkId}}",
-            fail = "更新 Chunk 失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_CHUNK,
-            subType = BizChangeOperationType.UPDATE,
-            bizNo = "{{#chunkId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public void update(String docId, String chunkId, KnowledgeChunkUpdateRequest requestParam) {
         KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
         Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
@@ -180,13 +164,11 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         KnowledgeChunkDO chunkDO = chunkMapper.selectById(chunkId);
         Assert.notNull(chunkDO, () -> new ClientException("Chunk 不存在"));
         Assert.isTrue(chunkDO.getDocId().equals(docId), () -> new ClientException("Chunk 不属于该文档"));
-        KnowledgeChunkDO before = BeanUtil.copyProperties(chunkDO, KnowledgeChunkDO.class);
 
         String newContent = requestParam.getContent();
         Assert.notBlank(newContent, () -> new ClientException("Chunk 内容不能为空"));
 
         if (newContent.equals(chunkDO.getContent())) {
-            bizChangeLogContext.skip();
             return;
         }
 
@@ -212,20 +194,10 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
             vectorStoreService.updateChunk(collectionName, docId,
                     embedPersisted(List.of(chunkDO), vectorTargetResolver.resolve(kbDO)).get(0));
         }
-        bizChangeLogContext.put(chunkId, before, chunkMapper.selectById(chunkId));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @LogRecord(
-            success = "删除 Chunk：{{#chunkId}}",
-            fail = "删除 Chunk 失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_CHUNK,
-            subType = BizChangeOperationType.DELETE,
-            bizNo = "{{#chunkId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public void delete(String docId, String chunkId) {
         KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
         Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
@@ -236,7 +208,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         KnowledgeChunkDO chunkDO = chunkMapper.selectById(chunkId);
         Assert.notNull(chunkDO, () -> new ClientException("Chunk 不存在"));
         Assert.isTrue(chunkDO.getDocId().equals(docId), () -> new ClientException("Chunk 不属于该文档"));
-        KnowledgeChunkDO before = BeanUtil.copyProperties(chunkDO, KnowledgeChunkDO.class);
 
         KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(documentDO.getKbId());
         Assert.notNull(kbDO, () -> new ServiceException("知识库不存在"));
@@ -251,20 +222,10 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         log.info("删除 Chunk 成功, kbId={}, docId={}, chunkId={}", documentDO.getKbId(), docId, chunkId);
 
         deleteChunkFromVector(collectionName, chunkId);
-        bizChangeLogContext.put(chunkId, before, null);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @LogRecord(
-            success = "{{#enabled ? '启用' : '禁用'}} Chunk：{{#chunkId}}",
-            fail = "修改 Chunk 启用状态失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_CHUNK,
-            subType = "{{#enabled ? 'ENABLE' : 'DISABLE'}}",
-            bizNo = "{{#chunkId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public void enableChunk(String docId, String chunkId, boolean enabled) {
         KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
         Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
@@ -276,12 +237,10 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         KnowledgeChunkDO chunkDO = chunkMapper.selectById(chunkId);
         Assert.notNull(chunkDO, () -> new ClientException("Chunk 不存在"));
         Assert.isTrue(chunkDO.getDocId().equals(docId), () -> new ClientException("Chunk 不属于该文档"));
-        KnowledgeChunkDO before = BeanUtil.copyProperties(chunkDO, KnowledgeChunkDO.class);
 
         // 如果状态没变，直接返回
         int enabledValue = enabled ? 1 : 0;
         if (chunkDO.getEnabled().equals(enabledValue)) {
-            bizChangeLogContext.skip();
             return;
         }
 
@@ -299,19 +258,9 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         } else {
             deleteChunkFromVector(collectionName, chunkId);
         }
-        bizChangeLogContext.put(chunkId, before, chunkMapper.selectById(chunkId));
     }
 
     @Override
-    @LogRecord(
-            success = "批量{{#enabled ? '启用' : '禁用'}} Chunk：{{#docId}}",
-            fail = "批量修改 Chunk 启用状态失败：{{#_errorMsg}}",
-            type = BizChangeBizType.KNOWLEDGE_CHUNK,
-            subType = "{{#enabled ? 'ENABLE' : 'DISABLE'}}",
-            bizNo = "{{#docId}}",
-            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
-            condition = BizChangeLogContext.RECORD_CONDITION
-    )
     public void batchToggleEnabled(String docId, KnowledgeChunkBatchRequest requestParam, boolean enabled) {
         if (requestParam == null || CollUtil.isEmpty(requestParam.getChunkIds())) {
             throw new ClientException("请指定需要操作的 Chunk，全量启用/禁用请使用文档启用接口");
@@ -340,7 +289,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         List<String> targetIds = found.stream().map(KnowledgeChunkDO::getId).collect(Collectors.toList());
 
         if (CollUtil.isEmpty(targetIds)) {
-            bizChangeLogContext.skip();
             return;
         }
 
@@ -355,9 +303,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         if (CollUtil.isEmpty(needUpdateIds)) {
             throw new ClientException(enabled ? "所有 Chunk 已全部启用，无需重复操作" : "所有 Chunk 已全部禁用，无需重复操作");
         }
-        List<KnowledgeChunkDO> before = needUpdateChunks.stream()
-                .map(each -> BeanUtil.copyProperties(each, KnowledgeChunkDO.class))
-                .collect(Collectors.toList());
 
         KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(documentDO.getKbId());
         String collectionName = kbDO.getCollectionName();
@@ -388,7 +333,6 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
 
         log.info("批量{}Chunk 成功, kbId={}, docId={}, count={}", enabled ? "启用" : "禁用",
                 documentDO.getKbId(), docId, needUpdateIds.size());
-        bizChangeLogContext.put(docId, before, chunkMapper.selectByIds(needUpdateIds));
     }
 
     @Override

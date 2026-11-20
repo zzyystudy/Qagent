@@ -16,7 +16,6 @@ spring:
     redis:
       host: ${shared.service.node}
       port: 6378
-      password:
       lettuce:
         pool:
           max-active: 10
